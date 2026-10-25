@@ -491,6 +491,7 @@ async function registerCommands() {
 }
 
 async function loadScripts() {
+  console.log("[BOT] Attempting Discord login...");
   if (fs.existsSync(mobileScriptPath)) {
     SCRIPTS.mobile = fs.readFileSync(mobileScriptPath, "utf8").trim();
     console.log("[SCRIPTS] Loaded scripts/mobile.lua");
