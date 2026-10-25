@@ -1,4 +1,3 @@
-
 const {
   Client,
   GatewayIntentBits,
@@ -8,388 +7,601 @@ const {
   ButtonStyle,
   SlashCommandBuilder,
   REST,
-  Routes,
-  ModalBuilder,
-  TextInputBuilder,
-  TextInputStyle
+  Routes
 } = require("discord.js");
 
+const fs = require("fs");
+const path = require("path");
 const express = require("express");
-const http = require("http");
-const https = require("https");
-const crypto = require("crypto");
 
 const app = express();
-const PORT = process.env.PORT || 10000;
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds]
-});
+const BOT_TOKEN = process.env.BOT_TOKEN;
+const CLIENT_ID = process.env.CLIENT_ID;
+const GUILD_ID = process.env.GUILD_ID;
+const PORT = Number(process.env.PORT || 3000);
+const DOMAIN = process.env.DOMAIN || `localhost:${PORT}`;
 
-const {
-  DISCORD_TOKEN,
-  CLIENT_ID,
-  GUILD_ID,
-  MAIN_LOADER_URL,
-  MOBILE_LOADER_URL
-} = process.env;
+const STAFF_ROLE_ID = "1563030053267181630";
+const BUYER_ROLE_ID = "1563733088675172522";
 
-const PURPLE = 0x302536;
-const BLACK = 0x100D10;
-const RED = 0x761C2B;
+const MAIN_ACCESS_ROLE = process.env.MAIN_ACCESS_ROLE || BUYER_ROLE_ID;
+const MOBILE_MAIN_ROLE = process.env.MOBILE_MAIN_ROLE || BUYER_ROLE_ID;
 
-// HEALTH SERVER
-app.get("/", (_req, res) => {
-  res.status(200).send("🎃 vivians is running 🦇");
-});
+const KEY_PREFIX = "JAMARI";
+const KEY_LIFETIME = 1000 * 60 * 60 * 24 * 30;
 
-app.get("/health", (_req, res) => {
-  res.status(200).json({
-    status: "ok",
-    bot: "Jamari",
-    discord: client.isReady()
-  });
-});
+const PURPLE = 0x30213F;
+const BLACK = 0x111014;
+const RED = 0x7D1828;
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`[WEB] Listening on port ${PORT}`);
-});
+const DB_BASE = path.join(__dirname, "data");
+const DB_PATH = path.join(DB_BASE, "database.json");
 
-// KEEP ALIVE
-const KEEP_ALIVE_INTERVAL = 5 * 60 * 1000;
+const SCRIPTS = {};
+const mobileScriptPath = path.join(__dirname, "scripts", "mobile.lua");
 
-function startKeepAlive() {
-  const urlStr =
-    process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
-
-  const healthUrl = `${urlStr.replace(/\/+$/, "")}/health`;
-  const mod = healthUrl.startsWith("https") ? https : http;
-
-  setInterval(() => {
-    const req = mod.get(healthUrl, { timeout: 5000 }, res => {
-      let data = "";
-
-      res.on("data", chunk => {
-        data += chunk;
-      });
-
-      res.on("end", () => {
-        try {
-          const json = JSON.parse(data);
-
-          if (res.statusCode === 200 && json.status === "ok") {
-            console.log(
-              "[KEEP-ALIVE] Ping successful — " +
-              new Date().toLocaleTimeString()
-            );
-          }
-        } catch {
-          console.log("[KEEP-ALIVE] Invalid health response.");
-        }
-      });
-    });
-
-    req.on("timeout", () => {
-      req.destroy(new Error("keep-alive timeout"));
-    });
-
-    req.on("error", err => {
-      console.log("[KEEP-ALIVE] Ping failed: " + err.message);
-    });
-  }, KEEP_ALIVE_INTERVAL);
+if (!BOT_TOKEN || !CLIENT_ID) {
+  console.error("[STARTUP ERROR] BOT_TOKEN and CLIENT_ID are required.");
+  process.exit(1);
 }
 
-startKeepAlive();
+function now() {
+  return Date.now();
+}
 
-// JAMARI KEY GENERATOR
+function safeString(value) {
+  if (typeof value !== "string") return null;
+  return value.trim().toLowerCase();
+}
+
+function readDB() {
+  try {
+    fs.mkdirSync(DB_BASE, { recursive: true });
+
+    if (!fs.existsSync(DB_PATH)) {
+      fs.writeFileSync(DB_PATH, JSON.stringify({}, null, 2), "utf8");
+      return {};
+    }
+
+    return JSON.parse(fs.readFileSync(DB_PATH, "utf8"));
+  } catch (error) {
+    console.error("[DATABASE] Auto-repairing:", error.message);
+
+    try {
+      fs.writeFileSync(DB_PATH, JSON.stringify({}, null, 2), "utf8");
+    } catch (_) {}
+
+    return {};
+  }
+}
+
+function writeDB(db) {
+  try {
+    fs.mkdirSync(DB_BASE, { recursive: true });
+    fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2), "utf8");
+  } catch (error) {
+    console.error("[DATABASE WRITE ERROR]", error.message);
+  }
+}
+
 function generateKey() {
-  const a = Math.random().toString(36).substring(2, 6).toUpperCase();
-  const b = Math.random().toString(36).substring(2, 10).toUpperCase();
-  const c = Math.random().toString(36).substring(2, 4).toUpperCase();
+  const randomPart = (len) => {
+    const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    let output = "";
 
-  return "JAMARI-" + a + "-" + b + "-" + c;
+    for (let i = 0; i < len; i++) {
+      output += alphabet[Math.floor(Math.random() * alphabet.length)];
+    }
+
+    return output;
+  };
+
+  return `${KEY_PREFIX}-${randomPart(4)}-${randomPart(8)}-${randomPart(4)}`;
 }
 
-function formatDate(ms) {
-  const d = new Date(ms);
-  const months = [
-    "January", "February", "March", "April",
-    "May", "June", "July", "August",
-    "September", "October", "November", "December"
-  ];
+function ensureAccount(db, userId, username) {
+  const cleanName = safeString(username) || String(userId);
 
-  return months[d.getMonth()] + " " +
-    d.getDate() + ", " + d.getFullYear();
+  if (!db[cleanName]) {
+    db[cleanName] = {
+      username: cleanName,
+      discordId: String(userId),
+      key: null,
+      keyCreatedAt: null,
+      hwid: null,
+      hwidLockedAt: null,
+      allowedScripts: [],
+      status: "active",
+      createdAt: now()
+    };
+  }
+
+  return db[cleanName];
 }
 
-// WEDNESDAY PANEL
-function createPanel() {
-  const embed = new EmbedBuilder()
+// WEDNESDAY ADDAMS PANEL
+function createJamariPanelEmbed(userName = "unknown") {
+  return new EmbedBuilder()
     .setColor(PURPLE)
-    .setTitle("☾ 𝖂𝖊𝖉𝖓𝖊𝖘𝖉𝖆𝖞'𝖘 𝕻𝖆𝖓𝖊𝖑 ☽")
-    .setDescription([
-      "╭───────────────╮",
-      "*Welcome to my little nightmare.*",
-      "Choose wisely. I dislike mistakes.",
-      "╰───────────────╯",
-      "",
-      "**☠ HOW TO USE**",
-      "› Register your username",
-      "› Generate your key",
-      "› Choose Main or Mobile",
-      "› Follow the instructions",
-      "",
-      "† ───────────────── †",
-      "",
-      "**♡ AVAILABLE ACTIONS**",
-      "Register · Get Key · Main · Mobile · Reset HWID",
-      "",
-      "*I find people exhausting. Buttons are acceptable.*"
-    ].join("\n"))
+    .setAuthor({
+      name: "THE ADDAMS FAMILY • JAMARI"
+    })
+    .setTitle("☠ 𝖂𝖊𝖉𝖓𝖊𝖘𝖉𝖆𝖞'𝖘 𝕾𝖈𝖗𝖎𝖕𝖙 𝕻𝖆𝖓𝖊𝖑")
+    .setDescription(
+      [
+        "*I find social interactions exhausting. This should be easier.*",
+        "",
+        "╭・ **ACCOUNT ACCESS**",
+        "│ Register your account and retrieve your key.",
+        "╰・ **SCRIPT ACCESS**",
+        "   Choose Main or Mobile Main below.",
+        "",
+        "━━━━━━━━━━━━━━━━━━━━",
+        "🕷️  **THE RULES OF THE HOUSE**",
+        "・ Keep your key somewhere safe.",
+        "・ Your key expires after 30 days.",
+        "・ Reset your HWID if you change devices.",
+        "━━━━━━━━━━━━━━━━━━━━",
+        "",
+        "*Trust no one. Especially not your key.*"
+      ].join("\n")
+    )
+    .addFields(
+      {
+        name: "🦇  Account",
+        value: "Register • Get Key",
+        inline: true
+      },
+      {
+        name: "🕸️  Loaders",
+        value: "Main • Mobile Main",
+        inline: true
+      },
+      {
+        name: "⚰️  Security",
+        value: "Reset HWID",
+        inline: true
+      }
+    )
     .setFooter({
-      text: "Jamari • I like skulls "
+      text: `JAMARI • Wednesday's approval is not guaranteed • @${userName}`
     })
     .setTimestamp();
+}
 
-  const row1 = new ActionRowBuilder().addComponents(
+function createButtonRow() {
+  return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId("register")
+      .setCustomId("jamari_register")
       .setLabel("Register")
-      .setEmoji("🕸️")
+      .setEmoji("🕷️")
       .setStyle(ButtonStyle.Secondary),
 
     new ButtonBuilder()
-      .setCustomId("getkey")
+      .setCustomId("jamari_get_key")
       .setLabel("Get Key")
-      .setEmoji("☠️")
-      .setStyle(ButtonStyle.Success),
+      .setEmoji("🗝️")
+      .setStyle(ButtonStyle.Primary),
 
     new ButtonBuilder()
-      .setCustomId("main")
+      .setCustomId("jamari_main")
       .setLabel("Main")
       .setEmoji("☠️")
       .setStyle(ButtonStyle.Secondary),
 
     new ButtonBuilder()
-      .setCustomId("mobile")
-      .setLabel("Mobile")
-      .setEmoji("🖤")
-      .setStyle(ButtonStyle.Secondary)
-  );
+      .setCustomId("jamari_mobile_main")
+      .setLabel("Mobile Main")
+      .setEmoji("🦇")
+      .setStyle(ButtonStyle.Secondary),
 
-  const row2 = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId("resethwid")
+      .setCustomId("jamari_reset_hwid")
       .setLabel("Reset HWID")
-      .setEmoji("🔒")
+      .setEmoji("⚰️")
       .setStyle(ButtonStyle.Danger)
   );
-
-  return { embed, components: [row1, row2] };
 }
 
-// SLASH COMMANDS
-async function registerCommands() {
-  const commands = [
-    new SlashCommandBuilder()
-      .setName("panel")
-      .setDescription("Post Jamari's Wednesday-themed panel"),
-
-    new SlashCommandBuilder()
-      .setName("announce")
-      .setDescription("Send an announcement")
-      .addStringOption(option =>
-        option
-          .setName("message")
-          .setDescription("Announcement text")
-          .setRequired(true)
-      )
-  ].map(command => command.toJSON());
-
-  const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
-
-  if (GUILD_ID) {
-    await rest.put(
-      Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
-      { body: commands }
-    );
-  } else {
-    await rest.put(
-      Routes.applicationCommands(CLIENT_ID),
-      { body: commands }
-    );
-  }
-
-  console.log("[DISCORD] Slash commands registered.");
+function createStatusEmbed(title, description, color = PURPLE) {
+  return new EmbedBuilder()
+    .setColor(color)
+    .setTitle(title)
+    .setDescription(description)
+    .setFooter({
+      text: "JAMARI • Wednesday is watching."
+    })
+    .setTimestamp();
 }
 
-client.once("ready", () => {
-  console.log(`[DISCORD] Logged in as ${client.user.tag}`);
+function createLoadHandler(scriptName) {
+  return (req, res) => {
+    try {
+      const db = readDB();
+      const { username, key, hwid } = req.body || {};
+      const cleanUser = safeString(username);
+
+      if (!cleanUser || !key || !hwid) {
+        return res.status(400).json({
+          success: false,
+          reason: "Username, key, and HWID are required."
+        });
+      }
+
+      const user = db[cleanUser];
+
+      if (!user) {
+        return res.json({
+          success: false,
+          reason: "Account not found."
+        });
+      }
+
+      if (user.status === "disabled") {
+        return res.json({
+          success: false,
+          reason: "Your account has been disabled."
+        });
+      }
+
+      if (String(user.key) !== String(key)) {
+        return res.json({
+          success: false,
+          reason: "Invalid key."
+        });
+      }
+
+      const keyCreatedAt = Number(user.keyCreatedAt);
+
+      if (
+        !Number.isFinite(keyCreatedAt) ||
+        now() - keyCreatedAt >= KEY_LIFETIME
+      ) {
+        return res.json({
+          success: false,
+          reason: "Your key has expired."
+        });
+      }
+
+      if (!user.allowedScripts || !user.allowedScripts.includes(scriptName)) {
+        return res.json({
+          success: false,
+          reason: "You do not have access to this script."
+        });
+      }
+
+      if (!user.hwid) {
+        user.hwid = String(hwid).trim();
+        user.hwidLockedAt = now();
+      } else if (String(user.hwid) !== String(hwid).trim()) {
+        return res.json({
+          success: false,
+          reason: "HWID mismatch."
+        });
+      }
+
+      writeDB(db);
+
+      const scriptCode = SCRIPTS[scriptName];
+
+      if (!scriptCode) {
+        return res.json({
+          success: false,
+          reason: "Script content is missing from the server."
+        });
+      }
+
+      const payload = [
+        "local success, err = pcall(function()",
+        "  local fn = loadstring(" + JSON.stringify(scriptCode) + ")",
+        "  if not fn then error('Failed to compile script payload') end",
+        "  return fn()",
+        "end)",
+        "if not success then error(err or 'Unknown Lua error') end"
+      ].join("\n");
+
+      return res.json({
+        success: true,
+        chunk: payload
+      });
+    } catch (error) {
+      console.error("[API] Loader failure:", error);
+
+      return res.status(500).json({
+        success: false,
+        reason: "Something went wrong. Please try again."
+      });
+    }
+  };
+}
+
+app.get("/", (req, res) => {
+  res.send("🕷️ Jamari is running. Wednesday is watching.");
 });
 
-// INTERACTIONS
-client.on("interactionCreate", async interaction => {
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    status: "ok",
+    bot: "Jamari",
+    scriptsLoaded: Object.keys(SCRIPTS).length
+  });
+});
+
+app.post("/load/main", createLoadHandler("main"));
+app.post("/load/mobile", createLoadHandler("mobile"));
+
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ]
+});
+
+client.on("ready", () => {
+  console.log(`[BOT] Logged in as ${client.user.tag}`);
+});
+
+client.on("interactionCreate", async (interaction) => {
   try {
-    if (interaction.isChatInputCommand()) {
-      if (interaction.commandName === "panel") {
-        const { embed, components } = createPanel();
-
-        await interaction.reply({
-          embeds: [embed],
-          components,
-          ephemeral: true
-        });
-        return;
-      }
-
-      if (interaction.commandName === "announce") {
-        if (!interaction.memberPermissions?.has("Administrator")) {
-          await interaction.reply({
-            content: "☠ Only administrators may make announcements.",
-            ephemeral: true
-          });
-          return;
-        }
-
-        const message = interaction.options.getString("message", true);
-
-        const embed = new EmbedBuilder()
-          .setColor(RED)
-          .setTitle("† A MESSAGE FROM THE DARK †")
-          .setDescription(message)
-          .setFooter({ text: "Jamari has spoken." })
-          .setTimestamp();
-
-        await interaction.reply({ embeds: [embed] });
-        return;
-      }
-    }
-
-    if (interaction.isButton()) {
-      const id = interaction.customId;
-
-      if (id === "register") {
-        const modal = new ModalBuilder()
-          .setCustomId("register_modal")
-          .setTitle("☠ Enter the darkness");
-
-        const username = new TextInputBuilder()
-          .setCustomId("username")
-          .setLabel("Roblox username")
-          .setPlaceholder("Enter your username")
-          .setStyle(TextInputStyle.Short)
-          .setMinLength(3)
-          .setMaxLength(20)
-          .setRequired(true);
-
-        modal.addComponents(
-          new ActionRowBuilder().addComponents(username)
-        );
-
-        await interaction.showModal(modal);
-        return;
-      }
-
-      if (id === "getkey") {
-        const key = generateKey();
-
-        await interaction.reply({
-          embeds: [
-            new EmbedBuilder()
-              .setColor(PURPLE)
-              .setTitle("🗝️ Your Jamari Key")
-              .setDescription(
-                `\`\`\`${key}\`\`\`\n` +
-                `Generated: ${formatDate(Date.now())}\n\n` +
-                "Demo key only. Keys are not saved or validated."
-              )
-          ],
-          ephemeral: true
-        });
-        return;
-      }
-
-      if (id === "main" || id === "mobile") {
-        const url = id === "main"
-          ? MAIN_LOADER_URL
-          : MOBILE_LOADER_URL;
-
-        if (!url) {
-          await interaction.reply({
-            content: `☠ The ${id} loader URL has not been configured.`,
-            ephemeral: true
-          });
-          return;
-        }
-
-        await interaction.reply({
-          embeds: [
-            new EmbedBuilder()
-              .setColor(BLACK)
-              .setTitle(id === "main" ? "☠ Main Loader" : "🖤 Mobile Loader")
-              .setDescription(`[Open your loader](${url})`)
-              .setFooter({ text: "Use only trusted links." })
-          ],
-          ephemeral: true
-        });
-        return;
-      }
-
-      if (id === "resethwid") {
-        await interaction.reply({
-          content:
-            " HWID reset.",
-          ephemeral: true
-        });
-        return;
-      }
-    }
-
     if (
-      interaction.isModalSubmit() &&
-      interaction.customId === "register_modal"
+      interaction.isChatInputCommand() &&
+      interaction.commandName === "jamari"
     ) {
+      const db = readDB();
       const username =
-        interaction.fields.getTextInputValue("username");
+        safeString(interaction.user.username) || interaction.user.id;
+
+      ensureAccount(db, interaction.user.id, username);
+      writeDB(db);
+
+      await interaction.reply({
+        embeds: [createJamariPanelEmbed(interaction.user.username)],
+        components: [createButtonRow()],
+        ephemeral: false
+      });
+
+      return;
+    }
+
+    if (!interaction.isButton()) return;
+
+    const db = readDB();
+    const accountName =
+      safeString(interaction.user.username) || String(interaction.user.id);
+
+    const existingAccount = ensureAccount(
+      db,
+      interaction.user.id,
+      accountName
+    );
+
+    if (interaction.customId === "jamari_register") {
+      existingAccount.discordId = String(interaction.user.id);
+      existingAccount.username = accountName;
+      existingAccount.status = "active";
+
+      writeDB(db);
 
       await interaction.reply({
         embeds: [
-          new EmbedBuilder()
-            .setColor(PURPLE)
-            .setTitle("🕸️ Registration received")
-            .setDescription(
-              `Username: **${username}**\n\n` +
-              "This is a demonstration. Account storage is not configured."
+          createStatusEmbed(
+            "🕷️ Registration Complete",
+            "Your account has been registered.\n\n*Try not to make a scene.*",
+            PURPLE
+          )
+        ],
+        ephemeral: true
+      });
+
+      return;
+    }
+
+    if (interaction.customId === "jamari_get_key") {
+      const newKey = generateKey();
+
+      existingAccount.key = newKey;
+      existingAccount.keyCreatedAt = now();
+      existingAccount.allowedScripts = ["main", "mobile"];
+
+      writeDB(db);
+
+      await interaction.reply({
+        embeds: [
+          createStatusEmbed(
+            "🗝️ Your Jamari Key",
+            [
+              "Your key has been generated.",
+              "",
+              `\`\`\`${newKey}\`\`\``,
+              "Expires in **30 days**.",
+              "",
+              "*Do not lose it. I won't comfort you.*"
+            ].join("\n"),
+            PURPLE
+          )
+        ],
+        ephemeral: true
+      });
+
+      return;
+    }
+
+    if (interaction.customId === "jamari_main") {
+      if (!existingAccount.key) {
+        await interaction.reply({
+          embeds: [
+            createStatusEmbed(
+              "⚰️ No Key Found",
+              "Get a key first. I refuse to solve unnecessary mysteries.",
+              RED
             )
+          ],
+          ephemeral: true
+        });
+
+        return;
+      }
+
+      if (!existingAccount.allowedScripts) {
+        existingAccount.allowedScripts = [];
+      }
+
+      if (!existingAccount.allowedScripts.includes("main")) {
+        existingAccount.allowedScripts.push("main");
+      }
+
+      writeDB(db);
+
+      await interaction.reply({
+        embeds: [
+          createStatusEmbed(
+            "☠️ Main Access",
+            "Your Main access is enabled.\n\n*Proceed without enthusiasm.*"
+          )
+        ],
+        ephemeral: true
+      });
+
+      return;
+    }
+
+    if (interaction.customId === "jamari_mobile_main") {
+      if (!existingAccount.key) {
+        await interaction.reply({
+          embeds: [
+            createStatusEmbed(
+              "⚰️ No Key Found",
+              "Get a key first. Even Wednesday follows procedures.",
+              RED
+            )
+          ],
+          ephemeral: true
+        });
+
+        return;
+      }
+
+      if (!existingAccount.allowedScripts) {
+        existingAccount.allowedScripts = [];
+      }
+
+      if (!existingAccount.allowedScripts.includes("mobile")) {
+        existingAccount.allowedScripts.push("mobile");
+      }
+
+      writeDB(db);
+
+      await interaction.reply({
+        embeds: [
+          createStatusEmbed(
+            "🦇 Mobile Main Access",
+            "Your Mobile Main access is enabled.\n\n*How delightfully unsettling.*"
+          )
+        ],
+        ephemeral: true
+      });
+
+      return;
+    }
+
+    if (interaction.customId === "jamari_reset_hwid") {
+      existingAccount.hwid = null;
+      existingAccount.hwidLockedAt = null;
+
+      writeDB(db);
+
+      await interaction.reply({
+        embeds: [
+          createStatusEmbed(
+            "⚰️ HWID Reset",
+            "Your HWID has been reset.\n\n*You may now bind your account to a new device.*"
+          )
         ],
         ephemeral: true
       });
     }
   } catch (error) {
-    console.error("[INTERACTION] Error:", error);
+    console.error("[INTERACTION ERROR]", error);
 
-    if (!interaction.replied && !interaction.deferred) {
+    if (
+      interaction.isRepliable() &&
+      !interaction.replied &&
+      !interaction.deferred
+    ) {
       await interaction.reply({
-        content: "Something went wrong. Check the Render logs.",
+        content: "🕷️ Something went wrong. Try again.",
         ephemeral: true
       }).catch(() => {});
     }
   }
 });
 
-// START BOT
-async function start() {
-  if (!DISCORD_TOKEN || !CLIENT_ID) {
-    throw new Error(
-      "Missing DISCORD_TOKEN or CLIENT_ID in Render environment variables."
-    );
-  }
+const jamariCommand = new SlashCommandBuilder()
+  .setName("jamari")
+  .setDescription("Open Wednesday's Jamari script panel");
 
-  await client.login(DISCORD_TOKEN);
-  await registerCommands();
+async function registerCommands() {
+  const body = [jamariCommand.toJSON()];
+  const rest = new REST({ version: "10" }).setToken(BOT_TOKEN);
+
+  try {
+    if (GUILD_ID) {
+      await rest.put(
+        Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
+        { body }
+      );
+
+      console.log("[DISCORD] Registered guild commands.");
+    } else {
+      await rest.put(
+        Routes.applicationCommands(CLIENT_ID),
+        { body }
+      );
+
+      console.log("[DISCORD] Registered global commands.");
+    }
+  } catch (error) {
+    console.error("[DISCORD COMMAND REGISTRATION ERROR]", error);
+  }
 }
 
-start().catch(error => {
-  console.error("[STARTUP] Error:", error);
+async function loadScripts() {
+  if (fs.existsSync(mobileScriptPath)) {
+    SCRIPTS.mobile = fs.readFileSync(mobileScriptPath, "utf8");
+    console.log("[SCRIPTS] Loaded scripts/mobile.lua");
+  } else {
+    SCRIPTS.mobile = 'print("mobile script missing")';
+    console.warn("[SCRIPTS] scripts/mobile.lua not found; using fallback script.");
+  }
+
+  SCRIPTS.main = "print('main script loaded')";
+}
+
+async function start() {
+  await loadScripts();
+  await registerCommands();
+
+  await client.login(BOT_TOKEN);
+
+  app.listen(PORT, () => {
+    console.log(`[API] Listening on port ${PORT}`);
+  });
+}
+
+start().catch((error) => {
+  console.error("[BOOT ERROR]", error);
   process.exit(1);
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("[CRASH SHIELD] Uncaught Exception:", error);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[CRASH SHIELD] Unhandled Rejection:", reason);
 });
