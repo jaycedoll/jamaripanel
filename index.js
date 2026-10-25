@@ -20,7 +20,7 @@ app.use(express.urlencoded({ extended: true }));
 
 const BOT_TOKEN = process.env.BOT_TOKEN || process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID || process.env.DISCORD_CLIENT_ID;
-const GUILD_ID = "1562786812395659314";
+const GUILD_ID = process.env.GUILD_ID || process.env.DISCORD_GUILD_ID || null;
 const PORT = Number(process.env.PORT || 10000);
 
 const KEY_PREFIX = "JAMARI";
@@ -250,10 +250,10 @@ function createLoadHandler(scriptName) {
 
       const chunk = SCRIPTS[scriptName];
 
-      if (!chunk) {
+      if (!chunk || !chunk.trim()) {
         return res.json({
           success: false,
-          reason: "Script content is missing."
+          reason: "Script content is missing or unavailable."
         });
       }
 
