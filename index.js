@@ -7,7 +7,10 @@ const {
   ButtonStyle,
   SlashCommandBuilder,
   REST,
-  Routes
+  Routes,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle
 } = require("discord.js");
 
 const fs = require("fs");
@@ -27,6 +30,8 @@ const KEY_PREFIX = "JAMARI";
 const KEY_LIFETIME = 30 * 24 * 60 * 60 * 1000;
 const PURPLE = 0x30213F;
 const RED = 0x7D1828;
+const DARK = 0x120a0d;
+const DEEP_MAROON = 0x260d13;
 
 const DB_BASE = path.join(__dirname, "data");
 const DB_PATH = path.join(DB_BASE, "database.json");
@@ -94,6 +99,7 @@ function ensureAccount(db, userId, username) {
     db[name] = {
       username: name,
       discordId: String(userId),
+      password: null,
       key: null,
       keyCreatedAt: null,
       hwid: null,
@@ -110,32 +116,29 @@ function ensureAccount(db, userId, username) {
 
 function panelEmbed(username = "unknown") {
   return new EmbedBuilder()
-    .setColor(PURPLE)
-    .setAuthor({ name: "THE ADDAMS FAMILY • JAMARI" })
-    .setTitle("☠ 𝖂𝖊𝖉𝖓𝖊𝖘𝖉𝖆𝖞'𝖘 𝕾𝖈𝖗𝖎𝖕𝖙 𝕻𝖆𝖓𝖊𝖑")
+    .setColor(DEEP_MAROON)
+    .setAuthor({
+      name: "wednesday adams",
+      iconURL: "https://cdn.discordapp.com/embed/avatars/0.png"
+    })
+    .setTitle("jamari script panel")
     .setDescription([
-      "*I find social interactions exhausting. This should be easier.*",
+      "Use the buttons below to manage your account and access your scripts.",
       "",
-      "╭・ **ACCOUNT ACCESS**",
-      "│ Register and retrieve your key.",
-      "╰・ **SCRIPT ACCESS**",
-      "   Choose Main or Mobile Main.",
+      "Instructions",
+      "1. Register an account",
+      "2. Get your key",
+      "3. Choose a loader and paste it into your executor",
       "",
-      "━━━━━━━━━━━━━━━━━━━━",
-      "🕷️ **THE RULES OF THE HOUSE**",
-      "・ Keep your key safe.",
-      "・ Keys expire after 30 days.",
-      "・ Reset your HWID when changing devices.",
-      "━━━━━━━━━━━━━━━━━━━━",
-      "",
-      "*Trust no one. Especially not your key.*"
+      "Available Actions",
+      "Register, get your key, load Main or Mobile Main, and reset your HWID."
     ].join("\n"))
     .addFields(
-      { name: "🦇 Account", value: "Register • Get Key", inline: true },
-      { name: "🕸️ Loaders", value: "Main • Mobile Main", inline: true },
-      { name: "⚰️ Security", value: "Reset HWID", inline: true }
+      { name: "Account", value: "Register • Get key", inline: true },
+      { name: "Loaders", value: "Main • Mobile Main", inline: true },
+      { name: "Security", value: "Reset HWID", inline: true }
     )
-    .setFooter({ text: `JAMARI • Wednesday is watching • @${username}` })
+    .setFooter({ text: `jamari • wednesday is watching • @${username}` })
     .setTimestamp();
 }
 
@@ -144,7 +147,7 @@ function statusEmbed(title, description, color = PURPLE) {
     .setColor(color)
     .setTitle(title)
     .setDescription(description)
-    .setFooter({ text: "JAMARI • Wednesday is watching." })
+    .setFooter({ text: "jamari • wednesday is watching." })
     .setTimestamp();
 }
 
@@ -153,29 +156,108 @@ function panelButtons() {
     new ButtonBuilder()
       .setCustomId("jamari_register")
       .setLabel("Register")
-      .setEmoji("🕷️")
-      .setStyle(ButtonStyle.Secondary),
+      .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
       .setCustomId("jamari_get_key")
       .setLabel("Get Key")
-      .setEmoji("🗝️")
-      .setStyle(ButtonStyle.Primary),
+      .setStyle(ButtonStyle.Success),
     new ButtonBuilder()
       .setCustomId("jamari_main")
       .setLabel("Main")
-      .setEmoji("☠️")
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId("jamari_mobile_main")
       .setLabel("Mobile Main")
-      .setEmoji("🦇")
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId("jamari_reset_hwid")
       .setLabel("Reset HWID")
-      .setEmoji("⚰️")
       .setStyle(ButtonStyle.Danger)
   );
+}
+
+function textInput(customId, label, placeholder, style = TextInputStyle.Short) {
+  return new TextInputBuilder()
+    .setCustomId(customId)
+    .setLabel(label)
+    .setPlaceholder(placeholder)
+    .setRequired(true)
+    .setStyle(style);
+}
+
+function buildModal(type) {
+  const modal = new ModalBuilder().setCustomId(`modal_${type}`);
+
+  switch (type) {
+    case "register":
+      modal.setTitle("Register");
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(
+          textInput("username", "Username", "Enter your username")
+        ),
+        new ActionRowBuilder().addComponents(
+          textInput("password", "Password", "Enter your password")
+        )
+      );
+      return modal;
+
+    case "get_key":
+      modal.setTitle("Get Key");
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(
+          textInput("username", "Username", "Enter your username")
+        ),
+        new ActionRowBuilder().addComponents(
+          textInput("password", "Password", "Enter your password")
+        )
+      );
+      return modal;
+
+    case "reset_hwid":
+      modal.setTitle("Reset HWID");
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(
+          textInput("username", "Username", "Enter your username")
+        ),
+        new ActionRowBuilder().addComponents(
+          textInput("password", "Password", "Enter your password")
+        )
+      );
+      return modal;
+
+    case "main":
+      modal.setTitle("Main Loader");
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(
+          textInput("username", "Username", "Enter your username")
+        ),
+        new ActionRowBuilder().addComponents(
+          textInput("password", "Password", "Enter your password")
+        ),
+        new ActionRowBuilder().addComponents(
+          textInput("key", "Key", "Enter your Jamari key")
+        )
+      );
+      return modal;
+
+    case "mobile_main":
+      modal.setTitle("Mobile Main Loader");
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(
+          textInput("username", "Username", "Enter your username")
+        ),
+        new ActionRowBuilder().addComponents(
+          textInput("password", "Password", "Enter your password")
+        ),
+        new ActionRowBuilder().addComponents(
+          textInput("key", "Key", "Enter your Jamari key")
+        )
+      );
+      return modal;
+
+    default:
+      return modal;
+  }
 }
 
 const client = new Client({
@@ -301,17 +383,49 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
-    if (!interaction.isButton()) return;
+    if (interaction.isButton()) {
+      const db = readDB();
+      ensureAccount(db, interaction.user.id, interaction.user.username);
+      writeDB(db);
 
-    const db = readDB();
-    const account = ensureAccount(
-      db,
-      interaction.user.id,
-      interaction.user.username
-    );
+      switch (interaction.customId) {
+        case "jamari_register":
+          await interaction.showModal(buildModal("register"));
+          return;
+        case "jamari_get_key":
+          await interaction.showModal(buildModal("get_key"));
+          return;
+        case "jamari_reset_hwid":
+          await interaction.showModal(buildModal("reset_hwid"));
+          return;
+        case "jamari_main":
+          await interaction.showModal(buildModal("main"));
+          return;
+        case "jamari_mobile_main":
+          await interaction.showModal(buildModal("mobile_main"));
+          return;
+      }
+    }
 
-    switch (interaction.customId) {
-      case "jamari_register":
+    if (interaction.isModalSubmit()) {
+      const db = readDB();
+      const modalType = interaction.customId.replace(/^modal_/, "");
+      const username = (interaction.fields.getTextInputValue("username") || "").trim();
+      const password = (interaction.fields.getTextInputValue("password") || "").trim();
+      const keyValue = (interaction.fields.getTextInputValue("key") || "").trim();
+
+      if (!username) {
+        await interaction.reply({
+          content: "Username is required.",
+          ephemeral: true
+        });
+        return;
+      }
+
+      const account = ensureAccount(db, interaction.user.id, username);
+
+      if (modalType === "register") {
+        account.password = password || null;
         account.status = "active";
         writeDB(db);
         await interaction.reply({
@@ -323,9 +437,22 @@ client.on("interactionCreate", async (interaction) => {
           ],
           ephemeral: true
         });
-        break;
+        return;
+      }
 
-      case "jamari_get_key": {
+      if (password) {
+        if (!account.password) {
+          account.password = password;
+        } else if (account.password !== password) {
+          await interaction.reply({
+            embeds: [statusEmbed("⚰️ Invalid Password", "The password you entered does not match this account.", RED)],
+            ephemeral: true
+          });
+          return;
+        }
+      }
+
+      if (modalType === "get_key") {
         const key = generateKey();
         account.key = key;
         account.keyCreatedAt = now();
@@ -341,33 +468,43 @@ client.on("interactionCreate", async (interaction) => {
           ],
           ephemeral: true
         });
-        break;
+        return;
       }
 
-      case "jamari_main":
-      case "jamari_mobile_main": {
+      if (modalType === "reset_hwid") {
+        account.hwid = null;
+        account.hwidLockedAt = null;
+        writeDB(db);
+        await interaction.reply({
+          embeds: [statusEmbed("⚰️ HWID Reset", "Your HWID has been reset.")],
+          ephemeral: true
+        });
+        return;
+      }
+
+      if (modalType === "main" || modalType === "mobile_main") {
+        const scriptName = modalType === "main" ? "main" : "mobile";
+
         if (!account.key) {
           await interaction.reply({
-            embeds: [
-              statusEmbed(
-                "⚰️ No Key Found",
-                "Get a key first.",
-                RED
-              )
-            ],
+            embeds: [statusEmbed("⚰️ No Key Found", "Get a key first.", RED)],
             ephemeral: true
           });
-          break;
+          return;
         }
 
-        const scriptName =
-          interaction.customId === "jamari_main" ? "main" : "mobile";
+        if (String(account.key) !== String(keyValue)) {
+          await interaction.reply({
+            embeds: [statusEmbed("⚰️ Invalid Key", "The key you entered does not match this account.", RED)],
+            ephemeral: true
+          });
+          return;
+        }
 
         account.allowedScripts ||= [];
         if (!account.allowedScripts.includes(scriptName)) {
           account.allowedScripts.push(scriptName);
         }
-
         writeDB(db);
 
         await interaction.reply({
@@ -379,25 +516,11 @@ client.on("interactionCreate", async (interaction) => {
           ],
           ephemeral: true
         });
-        break;
+        return;
       }
-
-      case "jamari_reset_hwid":
-        account.hwid = null;
-        account.hwidLockedAt = null;
-        writeDB(db);
-
-        await interaction.reply({
-          embeds: [
-            statusEmbed(
-              "⚰️ HWID Reset",
-              "Your HWID has been reset."
-            )
-          ],
-          ephemeral: true
-        });
-        break;
     }
+
+    if (!interaction.isButton()) return;
   } catch (error) {
     console.error("[INTERACTION ERROR]", error);
 
