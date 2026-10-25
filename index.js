@@ -20,7 +20,7 @@ app.use(express.urlencoded({ extended: true }));
 
 const BOT_TOKEN = process.env.BOT_TOKEN || process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID || process.env.DISCORD_CLIENT_ID;
-const GUILD_ID = process.env.GUILD_ID;
+const GUILD_ID = "1562786812395659314";
 const PORT = Number(process.env.PORT || 10000);
 
 const KEY_PREFIX = "JAMARI";
@@ -39,9 +39,9 @@ console.log("[ENV DEBUG]", {
   hasClientId: Boolean(CLIENT_ID),
   hasGuildId: Boolean(GUILD_ID),
   port: PORT,
+  guildId: GUILD_ID,
   botTokenLength: BOT_TOKEN ? BOT_TOKEN.length : 0,
-  clientIdLength: CLIENT_ID ? CLIENT_ID.length : 0,
-  guildIdLength: GUILD_ID ? GUILD_ID.length : 0
+  clientIdLength: CLIENT_ID ? CLIENT_ID.length : 0
 });
 
 if (!BOT_TOKEN) {
