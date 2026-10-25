@@ -1,4 +1,3 @@
-
 const {
   Client,
   GatewayIntentBits,
@@ -19,8 +18,8 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const CLIENT_ID = process.env.CLIENT_ID;
+const BOT_TOKEN = process.env.BOT_TOKEN || process.env.DISCORD_TOKEN;
+const CLIENT_ID = process.env.CLIENT_ID || process.env.DISCORD_CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
 const PORT = Number(process.env.PORT || 10000);
 
@@ -31,11 +30,12 @@ const RED = 0x7D1828;
 
 const DB_BASE = path.join(__dirname, "data");
 const DB_PATH = path.join(DB_BASE, "database.json");
-const mobileScriptPath = path.join(__dirname, "scripts", "mobile.lua");
+const MOBILE_SCRIPT_PATH = path.join(__dirname, "scripts", "mobile.lua");
+const MAIN_SCRIPT_PATH = path.join(__dirname, "scripts", "main.lua");
 const SCRIPTS = {};
 
-if (!BOT_TOKEN || !CLIENT_ID) {
-  console.error("[STARTUP ERROR] BOT_TOKEN and CLIENT_ID are required.");
+if (!BOT_TOKEN) {
+  console.error("[STARTUP ERROR] BOT_TOKEN or DISCORD_TOKEN is required.");
   process.exit(1);
 }
 
@@ -72,10 +72,7 @@ function writeDB(db) {
 function generateKey() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const part = (length) =>
-    Array.from(
-      { length },
-      () => alphabet[Math.floor(Math.random() * alphabet.length)]
-    ).join("");
+    Array.from({ length }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("");
 
   return `${KEY_PREFIX}-${part(4)}-${part(8)}-${part(4)}`;
 }
@@ -128,9 +125,7 @@ function panelEmbed(username = "unknown") {
       { name: "🕸️ Loaders", value: "Main • Mobile Main", inline: true },
       { name: "⚰️ Security", value: "Reset HWID", inline: true }
     )
-    .setFooter({
-      text: `JAMARI • Wednesday is watching • @${username}`
-    })
+    .setFooter({ text: `JAMARI • Wednesday is watching • @${username}` })
     .setTimestamp();
 }
 
@@ -185,7 +180,8 @@ app.get("/health", (req, res) => {
   res.status(200).json({
     status: "ok",
     bot: client.isReady() ? "online" : "offline",
-    scriptsLoaded: Object.keys(SCRIPTS).length
+    scriptsLoaded: Object.keys(SCRIPTS).length,
+    uptime: process.uptime()
   });
 });
 
@@ -265,6 +261,9 @@ function createLoadHandler(scriptName) {
 
 client.once("ready", () => {
   console.log(`[BOT] Logged in as ${client.user.tag}`);
+  registerCommands().catch((error) => {
+    console.error("[DISCORD COMMAND REGISTRATION ERROR]", error);
+  });
 });
 
 client.on("error", (error) => {
@@ -393,10 +392,12 @@ client.on("interactionCreate", async (interaction) => {
     console.error("[INTERACTION ERROR]", error);
 
     if (interaction.isRepliable() && !interaction.replied) {
-      await interaction.reply({
-        content: "Something went wrong. Check the Render logs.",
-        ephemeral: true
-      }).catch(() => {});
+      await interaction
+        .reply({
+          content: "Something went wrong. Check the Render logs.",
+          ephemeral: true
+        })
+        .catch(() => {});
     }
   }
 });
@@ -406,6 +407,11 @@ const jamariCommand = new SlashCommandBuilder()
   .setDescription("Open Wednesday's Jamari script panel");
 
 async function registerCommands() {
+  if (!CLIENT_ID) {
+    console.warn("[DISCORD] CLIENT_ID not set. Skipping slash command registration.");
+    return;
+  }
+
   const rest = new REST({ version: "10" }).setToken(BOT_TOKEN);
 
   if (GUILD_ID) {
@@ -424,15 +430,29 @@ async function registerCommands() {
 }
 
 async function loadScripts() {
-  if (fs.existsSync(mobileScriptPath)) {
-    SCRIPTS.mobile = fs.readFileSync(mobileScriptPath, "utf8").trim();
+  const scriptsDir = path.join(__dirname, "scripts");
+
+  try {
+    fs.mkdirSync(scriptsDir, { recursive: true });
+  } catch (error) {
+    console.error("[SCRIPTS] Failed to ensure scripts directory exists.", error);
+  }
+
+  if (fs.existsSync(MOBILE_SCRIPT_PATH)) {
+    SCRIPTS.mobile = fs.readFileSync(MOBILE_SCRIPT_PATH, "utf8").trim();
     console.log("[SCRIPTS] Loaded scripts/mobile.lua");
   } else {
     SCRIPTS.mobile = "";
     console.warn("[SCRIPTS] scripts/mobile.lua is missing.");
   }
 
-  SCRIPTS.main = "";
+  if (fs.existsSync(MAIN_SCRIPT_PATH)) {
+    SCRIPTS.main = fs.readFileSync(MAIN_SCRIPT_PATH, "utf8").trim();
+    console.log("[SCRIPTS] Loaded scripts/main.lua");
+  } else {
+    SCRIPTS.main = "";
+    console.warn("[SCRIPTS] scripts/main.lua is missing.");
+  }
 }
 
 app.listen(PORT, "0.0.0.0", () => {
@@ -449,9 +469,7 @@ async function start() {
   try {
     const loginTimeout = new Promise((_, reject) => {
       loginTimer = setTimeout(() => {
-        reject(new Error(
-          "Discord login did not complete within 20 seconds. Check token and connectivity."
-        ));
+        reject(new Error("Discord login did not complete within 20 seconds. Check token and connectivity."));
       }, 20000);
     });
 
@@ -465,13 +483,6 @@ async function start() {
   } catch (error) {
     clearTimeout(loginTimer);
     console.error("[DISCORD LOGIN ERROR]", error);
-    return;
-  }
-
-  try {
-    await registerCommands();
-  } catch (error) {
-    console.error("[DISCORD COMMAND REGISTRATION ERROR]", error);
   }
 }
 
@@ -486,4 +497,3 @@ process.on("unhandledRejection", (reason) => {
 process.on("uncaughtException", (error) => {
   console.error("[UNCAUGHT EXCEPTION]", error);
 });
-
