@@ -472,30 +472,25 @@ app.listen(PORT, "0.0.0.0", () => {
 async function start() {
   await loadScripts();
 
+  if (!BOT_TOKEN) {
+    console.error("[STARTUP ERROR] Missing BOT_TOKEN / DISCORD_TOKEN in environment.");
+    process.exit(1);
+  }
+
+  if (!CLIENT_ID) {
+    console.warn("[DISCORD] CLIENT_ID not set. Slash commands will not register.");
+  }
+
   console.log("[BOT] Attempting Discord login...");
 
-  let loginTimer;
-
   try {
-    const loginTimeout = new Promise((_, reject) => {
-      loginTimer = setTimeout(() => {
-        reject(new Error("Discord login did not complete within 20 seconds. Check token and connectivity."));
-      }, 20000);
-    });
-
-    await Promise.race([
-      client.login(BOT_TOKEN),
-      loginTimeout
-    ]);
-
-    clearTimeout(loginTimer);
-    console.log("[BOT] Login promise resolved.");
+    await client.login(BOT_TOKEN);
+    console.log("[BOT] Login successful.");
   } catch (error) {
-    clearTimeout(loginTimer);
     console.error("[DISCORD LOGIN ERROR]", error);
+    process.exit(1);
   }
 }
-
 start().catch((error) => {
   console.error("[BOOT ERROR]", error);
 });
