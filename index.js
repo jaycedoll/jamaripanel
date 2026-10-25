@@ -34,6 +34,16 @@ const MOBILE_SCRIPT_PATH = path.join(__dirname, "scripts", "mobile.lua");
 const MAIN_SCRIPT_PATH = path.join(__dirname, "scripts", "main.lua");
 const SCRIPTS = {};
 
+console.log("[ENV DEBUG]", {
+  hasBotToken: Boolean(BOT_TOKEN),
+  hasClientId: Boolean(CLIENT_ID),
+  hasGuildId: Boolean(GUILD_ID),
+  port: PORT,
+  botTokenLength: BOT_TOKEN ? BOT_TOKEN.length : 0,
+  clientIdLength: CLIENT_ID ? CLIENT_ID.length : 0,
+  guildIdLength: GUILD_ID ? GUILD_ID.length : 0
+});
+
 if (!BOT_TOKEN) {
   console.error("[STARTUP ERROR] BOT_TOKEN or DISCORD_TOKEN is required.");
   process.exit(1);
