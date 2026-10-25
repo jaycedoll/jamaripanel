@@ -34,14 +34,13 @@ const KEY_PREFIX = "JAMARI";
 const KEY_LIFETIME = 1000 * 60 * 60 * 24 * 30;
 
 const PURPLE = 0x30213F;
-const BLACK = 0x111014;
 const RED = 0x7D1828;
 
 const DB_BASE = path.join(__dirname, "data");
 const DB_PATH = path.join(DB_BASE, "database.json");
+const mobileScriptPath = path.join(__dirname, "scripts", "mobile.lua");
 
 const SCRIPTS = {};
-const mobileScriptPath = path.join(__dirname, "scripts", "mobile.lua");
 
 if (!BOT_TOKEN || !CLIENT_ID) {
   console.error("[STARTUP ERROR] BOT_TOKEN and CLIENT_ID are required.");
@@ -68,7 +67,7 @@ function readDB() {
 
     return JSON.parse(fs.readFileSync(DB_PATH, "utf8"));
   } catch (error) {
-    console.error("[DATABASE] Error:", error.message);
+    console.error("[DATABASE ERROR]", error.message);
     return {};
   }
 }
@@ -83,16 +82,15 @@ function writeDB(db) {
 }
 
 function generateKey() {
-  const randomPart = (len) => {
-    const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    let output = "";
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
-    for (let i = 0; i < len; i++) {
+  function randomPart(length) {
+    let output = "";
+    for (let i = 0; i < length; i++) {
       output += alphabet[Math.floor(Math.random() * alphabet.length)];
     }
-
     return output;
-  };
+  }
 
   return `${KEY_PREFIX}-${randomPart(4)}-${randomPart(8)}-${randomPart(4)}`;
 }
@@ -207,7 +205,10 @@ function createLoadHandler(scriptName) {
       const user = db[cleanUser];
 
       if (!user) {
-        return res.json({ success: false, reason: "Account not found." });
+        return res.json({
+          success: false,
+          reason: "Account not found."
+        });
       }
 
       if (user.status === "disabled") {
@@ -227,7 +228,10 @@ function createLoadHandler(scriptName) {
         !Number.isFinite(keyCreatedAt) ||
         now() - keyCreatedAt >= KEY_LIFETIME
       ) {
-        return res.json({ success: false, reason: "Your key has expired." });
+        return res.json({
+          success: false,
+          reason: "Your key has expired."
+        });
       }
 
       if (!user.allowedScripts || !user.allowedScripts.includes(scriptName)) {
@@ -237,10 +241,12 @@ function createLoadHandler(scriptName) {
         });
       }
 
+      const requestedHwid = String(hwid).trim();
+
       if (!user.hwid) {
-        user.hwid = String(hwid).trim();
+        user.hwid = requestedHwid;
         user.hwidLockedAt = now();
-      } else if (String(user.hwid) !== String(hwid).trim()) {
+      } else if (String(user.hwid) !== requestedHwid) {
         return res.json({ success: false, reason: "HWID mismatch." });
       }
 
@@ -270,6 +276,15 @@ function createLoadHandler(scriptName) {
   };
 }
 
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ]
+});
+
 app.get("/", (req, res) => {
   res.send("🕷️ Jamari is running. Wednesday is watching.");
 });
@@ -285,13 +300,8 @@ app.get("/health", (req, res) => {
 app.post("/load/main", createLoadHandler("main"));
 app.post("/load/mobile", createLoadHandler("mobile"));
 
-const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent
-  ]
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`[API] Listening on port ${PORT}`);
 });
 
 client.once("ready", () => {
@@ -492,15 +502,23 @@ async function loadScripts() {
   SCRIPTS.main = "print('main script loaded')";
 }
 
-// Open the Render web-service port before Discord startup.
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`[API] Listening on port ${PORT}`);
-});
-
 async function start() {
   await loadScripts();
-  await registerCommands();
-  await client.login(BOT_TOKEN);
+
+  // Log into Discord first; command registration errors won't stop the bot.
+  try {
+    await client.login(BOT_TOKEN);
+  } catch (error) {
+    console.error("[DISCORD LOGIN ERROR]", error);
+    return;
+  }
+
+  // Register slash commands after login, without taking the bot offline.
+  try {
+    await registerCommands();
+  } catch (error) {
+    console.error("[DISCORD COMMAND REGISTRATION ERROR]", error);
+  }
 }
 
 start().catch((error) => {
